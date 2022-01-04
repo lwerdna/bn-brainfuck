@@ -52,22 +52,6 @@ class Brainfuck(Architecture):
     flag_write_types = ['z']
     flags_written_by_flag_write_type = { 'z' : ['z'] }
 
-    def get_addr_of_open_bracket(self, addr):
-        """
-        Compute address of matching '['
-
-        :param addr: address of ']'
-        """
-        stack = []
-        for a in sorted(Brainfuck.bracket_mem):
-            if a == addr:
-                return stack.pop()
-
-            if Brainfuck.bracket_mem[a] == '[':
-                stack.append(a)
-            else:
-                stack.pop()
-
     def get_instruction_info(self, data, addr):
         """
         Provide information on branch operations
@@ -76,17 +60,20 @@ class Brainfuck(Architecture):
         :param addr: Start address of data
         """
 
+        # receive bracket info passed through core architecture
+        if not self.bracket_mem:
+            self.bracket_mem = Architecture['Brainfuck'].bracket_mem.copy()
+
         if isinstance(data, bytes):
             data = data.decode()
 
         res = function.InstructionInfo()
         res.length = 1
         if data == '[':
-            Brainfuck.bracket_mem[addr] = '['
+            pass
         elif data == ']':
-            Brainfuck.bracket_mem[addr] = ']'
             res.add_branch(BranchType.FalseBranch, addr+1)
-            res.add_branch(BranchType.TrueBranch, self.get_addr_of_open_bracket(addr))
+            res.add_branch(BranchType.TrueBranch, self.bracket_mem[addr])
 
         return res
 
@@ -132,7 +119,7 @@ class Brainfuck(Architecture):
                 InstructionTextToken(InstructionTextTokenType.RegisterToken, 'cp'),
             ]
         elif c == ']':
-            addr_true = self.get_addr_of_open_bracket(addr)
+            addr_true = self.bracket_mem[addr]
             tokens = [
                 InstructionTextToken(InstructionTextTokenType.InstructionToken, 'jnz'),
                 InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken, ' '),
@@ -178,7 +165,7 @@ class Brainfuck(Architecture):
         elif data in ['[', ' ', '\n']:
             expr_idx = il.nop()
         elif data == ']':
-            addr_true = self.get_addr_of_open_bracket(addr)
+            addr_true = self.bracket_mem[addr]
             addr_false = addr + 1
             expr_idx = cond_branch(il, il.flag_condition(LowLevelILFlagCondition.LLFC_NE), addr_true, addr_false)
         elif data in ['.', ',']:
@@ -203,24 +190,41 @@ class BrainfuckView(binaryview.BinaryView):
         self.raw = data
 
     @classmethod
-    def is_valid_for_data(self, data):
+    def balanced_brackets(self, text):
+        result = []
+        stack = []
+        for (i, c) in enumerate(text):
+            if text[i] == '[':
+                stack.append(i)
+            elif text[i] == ']':
+                if not stack:
+                    return
+                result.append((stack.pop(), i))
+        if not stack:
+            return result
+
+    @classmethod
+    def is_valid_for_data(self, bv):
         """
         Determine if we're compatible. File can have non-BF code (the 8 specified characters)
         as comments, so we just test for utf-8 characters and that filename ends with ".bf"
 
-        :param data: File data stream
+        :param bv: binary view
         :return: True if our loader is compatible, False if it is not
         """
 
         try:
-            data = data.read(0, len(data)).decode('utf-8')
+            data = bv.read(0, len(bv)).decode('utf-8')
         except UnicodeError:
             return False
 
-        if data.file.filename.upper().endswith('.BF'):
-            return True
+        if not bv.file.filename.lower().endswith('.bf'):
+            return False
 
-        return False
+        if not BrainfuckView.balanced_brackets(data):
+            return False
+
+        return True
 
     @classmethod
     def get_load_settings_for_data(cls, data):
@@ -248,10 +252,19 @@ class BrainfuckView(binaryview.BinaryView):
             self.add_entry_point(0)
             self.define_auto_symbol(Symbol(SymbolType.FunctionSymbol, 0, '_start'))
 
+            # set up bracket tracking
+            self.arch.bracket_mem = {}
+            data = self.read(0, len(self)).decode('utf-8')
+            for (a, b) in BrainfuckView.balanced_brackets(data):
+                self.arch.bracket_mem[a] = b
+                self.arch.bracket_mem[b] = a
+
             return True
         except Exception:
             log.log_error(traceback.format_exc())
             return False
+
+
 
 Brainfuck.register()
 BrainfuckView.register()
