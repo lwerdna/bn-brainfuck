@@ -10,24 +10,6 @@ __version__    = '1.0'
 __email__      = 'zznop0x90@gmail.com'
 
 
-def cond_branch(il, cond, addr_true, addr_false):
-    """
-    Creates a llil conditional branch expression
-
-    :param il: LLIL object
-    :param cond: Flag condition
-    :param dest: Branch destination
-    """
-
-    t = il.get_label_for_address(Architecture['Brainfuck'], addr_true)
-    if t is None:
-        t = LowLevelILLabel()
-    f = il.get_label_for_address(Architecture['Brainfuck'], addr_false)
-    if f is None:
-        f = LowLevelILLabel()
-    il.append(il.if_expr(cond, t, f))
-
-
 class Brainfuck(Architecture):
     """
     This class is responsible for disassembling and lifting Brainfuck code
@@ -48,7 +30,8 @@ class Brainfuck(Architecture):
 
     flags = ['z']
     flag_roles = { 'z' : FlagRole.ZeroFlagRole }
-    flags_required_for_flag_condition = { LowLevelILFlagCondition.LLFC_NE : ['z'] }
+    flags_required_for_flag_condition = { LowLevelILFlagCondition.LLFC_NE : ['z'],
+                                            LowLevelILFlagCondition.LLFC_E : ['z'] }
     flag_write_types = ['z']
     flags_written_by_flag_write_type = { 'z' : ['z'] }
 
@@ -70,10 +53,10 @@ class Brainfuck(Architecture):
         res = function.InstructionInfo()
         res.length = 1
         if data == '[':
-            pass
-        elif data == ']':
             res.add_branch(BranchType.FalseBranch, addr+1)
-            res.add_branch(BranchType.TrueBranch, self.bracket_mem[addr])
+            res.add_branch(BranchType.TrueBranch, self.bracket_mem[addr]+1)
+        elif data == ']':
+            res.add_branch(BranchType.UnconditionalBranch, self.bracket_mem[addr])
 
         return res
 
@@ -118,20 +101,27 @@ class Brainfuck(Architecture):
                 InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken, ' '),
                 InstructionTextToken(InstructionTextTokenType.RegisterToken, 'cp'),
             ]
-        elif c == ']':
-            addr_true = self.bracket_mem[addr]
+        elif c == '[':
+            dst = self.bracket_mem[addr]+1
             tokens = [
-                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'jnz'),
+                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'jz'),
                 InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken, ' '),
-                InstructionTextToken(InstructionTextTokenType.PossibleAddressToken, 'loc_%08X' % addr_true, addr_true),
+                InstructionTextToken(InstructionTextTokenType.PossibleAddressToken, 'loc_%08x' % dst, dst)
+            ]
+        elif c == ']':
+            dst = self.bracket_mem[addr]
+            tokens = [
+                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'jmp'),
+                InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken, ' '),
+                InstructionTextToken(InstructionTextTokenType.PossibleAddressToken, 'loc_%08x' % dst, dst)
             ]
         elif c == '.':
             tokens = [
-                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'stdout'),
+                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'putchar'),
             ]
         elif c == ',':
             tokens = [
-                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'stdin'),
+                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'getchar'),
             ]
         else:
             tokens = [
@@ -152,27 +142,45 @@ class Brainfuck(Architecture):
         if isinstance(data, bytes):
             data = data.decode()
 
-        expr_idx = None
-        data = data[0]
-        if data == '+':
-            expr_idx = il.store(1, il.reg(1, 'cp'), il.add(1, il.load(1, il.reg(1, 'cp')), il.const(1, 1)))
-        elif data == '-':
-            expr_idx = il.store(1, il.reg(1, 'cp'), il.sub(1, il.load(1, il.reg(1, 'cp')), il.const(1, 1)))
-        elif data == '>':
-            expr_idx = il.set_reg(1, 'cp', il.add(1, il.reg(1, 'cp'), il.const(1, 1)))
-        elif data == '<':
-            expr_idx = il.set_reg(1, 'cp', il.sub(1, il.reg(1, 'cp'), il.const(1, 1)), flags='z')
-        elif data in ['[', ' ', '\n']:
-            expr_idx = il.nop()
-        elif data == ']':
-            addr_true = self.bracket_mem[addr]
+        c = data[0]
+        if c == '+':
+            il.append(il.store(1, il.reg(1, 'cp'), il.add(1, il.load(1, il.reg(1, 'cp')), il.const(1, 1))))
+        elif c == '-':
+            il.append(il.store(1, il.reg(1, 'cp'), il.sub(1, il.load(1, il.reg(1, 'cp')), il.const(1, 1))))
+        elif c == '>':
+            il.append(il.set_reg(1, 'cp', il.add(1, il.reg(1, 'cp'), il.const(1, 1))))
+        elif c == '<':
+            il.append(il.set_reg(1, 'cp', il.sub(1, il.reg(1, 'cp'), il.const(1, 1), flags='z'), flags='z'))
+        elif c == '[':
+            il.append(il.nop())
+            cond = il.flag_condition(LowLevelILFlagCondition.LLFC_E)
             addr_false = addr + 1
-            expr_idx = cond_branch(il, il.flag_condition(LowLevelILFlagCondition.LLFC_NE), addr_true, addr_false)
-        elif data in ['.', ',']:
-            expr_idx = il.system_call()
+            addr_true = self.bracket_mem[addr] + 1
 
-        if expr_idx is not None:
-            il.append(expr_idx)
+            t = il.get_label_for_address(Architecture['Brainfuck'], addr_true)
+            f = il.get_label_for_address(Architecture['Brainfuck'], addr_false)
+            if t and f:
+                il.append(il.if_expr(cond, t, f))
+            else:
+                t = LowLevelILLabel()
+                f = LowLevelILLabel()
+                il.append(il.if_expr(cond, t, f))
+                il.mark_label(t)
+                il.append(il.jump(il.const_pointer(1, addr_true)))
+                il.mark_label(f)
+                il.append(il.jump(il.const_pointer(1, addr_false)))
+
+        elif c == ']':
+            addr = self.bracket_mem[addr]
+            label = il.get_label_for_address(Architecture['Brainfuck'], addr)
+            if label:
+                il.append(il.goto(label))
+            else:
+                il.append(il.jump(il.const_pointer(1, addr)))
+        elif c in ['.', ',']:
+            il.append(il.system_call())
+        else:
+            il.append(il.nop())
 
         return 1
 
