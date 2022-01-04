@@ -131,10 +131,6 @@ class Brainfuck(Architecture):
                 InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken, ' '),
                 InstructionTextToken(InstructionTextTokenType.RegisterToken, 'cp'),
             ]
-        elif c in ['[', '\n', ' ']:
-            tokens = [
-                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'nop'),
-            ]
         elif c == ']':
             addr_true = self.get_addr_of_open_bracket(addr)
             tokens = [
@@ -149,6 +145,10 @@ class Brainfuck(Architecture):
         elif c == ',':
             tokens = [
                 InstructionTextToken(InstructionTextTokenType.InstructionToken, 'stdin'),
+            ]
+        else:
+            tokens = [
+                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'nop'),
             ]
 
         return (tokens, 1)
