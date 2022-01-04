@@ -205,22 +205,26 @@ class BrainfuckView(binaryview.BinaryView):
     @classmethod
     def is_valid_for_data(self, data):
         """
-        Determine if we're compatible. Ensure the file consists solely of BF
-        code
+        Determine if we're compatible. File can have non-BF code (the 8 specified characters)
+        as comments, so we just test for utf-8 characters and that filename ends with ".bf"
 
         :param data: File data stream
         :return: True if our loader is compatible, False if it is not
         """
 
         try:
-            data = data.read(0, 16).decode('utf-8')
+            data = data.read(0, len(data)).decode('utf-8')
         except UnicodeError:
             return False
 
-        if re.match(r'[+\-<>.,\[\]\n ]+', data):
+        if data.file.filename.upper().endswith('.BF'):
             return True
 
         return False
+
+    @classmethod
+    def get_load_settings_for_data(cls, data):
+        return Settings("bf_load_settings")
 
     def init(self):
         """
