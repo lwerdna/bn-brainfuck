@@ -28,13 +28,6 @@ class Brainfuck(Architecture):
     stack_pointer = 'sp' # Not use, but required
     bracket_mem = {}
 
-    flags = ['z']
-    flag_roles = { 'z' : FlagRole.ZeroFlagRole }
-    flags_required_for_flag_condition = { LowLevelILFlagCondition.LLFC_NE : ['z'],
-                                            LowLevelILFlagCondition.LLFC_E : ['z'] }
-    flag_write_types = ['z']
-    flags_written_by_flag_write_type = { 'z' : ['z'] }
-
     def get_instruction_info(self, data, addr):
         """
         Provide information on branch operations
@@ -53,8 +46,8 @@ class Brainfuck(Architecture):
         res = function.InstructionInfo()
         res.length = 1
         if data == '[':
-            res.add_branch(BranchType.FalseBranch, addr+1)
-            res.add_branch(BranchType.TrueBranch, self.bracket_mem[addr]+1)
+            res.add_branch(BranchType.TrueBranch, addr+1)
+            res.add_branch(BranchType.FalseBranch, self.bracket_mem[addr]+1)
         elif data == ']':
             res.add_branch(BranchType.UnconditionalBranch, self.bracket_mem[addr])
 
@@ -104,7 +97,7 @@ class Brainfuck(Architecture):
         elif c == '[':
             dst = self.bracket_mem[addr]+1
             tokens = [
-                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'jz'),
+                InstructionTextToken(InstructionTextTokenType.InstructionToken, 'cjne'),
                 InstructionTextToken(InstructionTextTokenType.OperandSeparatorToken, ' '),
                 InstructionTextToken(InstructionTextTokenType.PossibleAddressToken, 'loc_%08x' % dst, dst)
             ]
@@ -150,12 +143,11 @@ class Brainfuck(Architecture):
         elif c == '>':
             il.append(il.set_reg(1, 'cp', il.add(1, il.reg(1, 'cp'), il.const(1, 1))))
         elif c == '<':
-            il.append(il.set_reg(1, 'cp', il.sub(1, il.reg(1, 'cp'), il.const(1, 1), flags='z'), flags='z'))
+            il.append(il.set_reg(1, 'cp', il.sub(1, il.reg(1, 'cp'), il.const(1, 1))))
         elif c == '[':
-            il.append(il.nop())
-            cond = il.flag_condition(LowLevelILFlagCondition.LLFC_E)
-            addr_false = addr + 1
-            addr_true = self.bracket_mem[addr] + 1
+            cond = il.compare_not_equal(1, il.load(1, il.reg(1, 'cp')), il.const(1, 0))
+            addr_true = addr + 1
+            addr_false = self.bracket_mem[addr] + 1
 
             t = il.get_label_for_address(Architecture['Brainfuck'], addr_true)
             f = il.get_label_for_address(Architecture['Brainfuck'], addr_false)
